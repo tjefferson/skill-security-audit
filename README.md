@@ -27,7 +27,7 @@ python3 scripts/scan_skill.py --slug stock-price-query
 ### Scan a specific version
 
 ```bash
-python3 scripts/scan_skill.py --slug stock-price-query --version 1.0.0
+python3 scripts/scan_skill.py --slug stock-price-query --version 1.0.3
 ```
 
 ## Usage as OpenClaw Skill
