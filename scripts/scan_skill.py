@@ -13,7 +13,7 @@ Usage:
     python3 scan_skill.py --slug <skill-slug>
 
     # Download a specific version
-    python3 scan_skill.py --slug <skill-slug> --version 1.2.0
+    python3 scan_skill.py --slug <skill-slug> --version 1.3.0
 
 Exit codes:
     0 - Scan completed (check report for findings)
@@ -300,6 +300,36 @@ def compute_file_hashes(skill_dir: Path) -> list:
 
 
 # ---------------------------------------------------------------------------
+# Safe ZIP extraction (Zip Slip / path traversal protection)
+# ---------------------------------------------------------------------------
+
+class _ZipPathTraversalError(Exception):
+    """Raised when a ZIP entry attempts path traversal outside the target directory."""
+
+
+def safe_extract(zf: zipfile.ZipFile, target_dir: Path) -> None:
+    """Extract all members of a ZipFile with path traversal protection.
+
+    For each entry, resolves the final destination path and verifies it falls
+    within *target_dir*. Raises _ZipPathTraversalError if any entry attempts
+    to escape via ``../`` or absolute paths — a technique known as "Zip Slip".
+    """
+    target_dir = target_dir.resolve()
+    for member in zf.infolist():
+        # Normalise the member filename and resolve against target_dir
+        member_path = (target_dir / Path(member.filename)).resolve()
+        # Ensure the resolved path is inside the target directory
+        if not str(member_path).startswith(str(target_dir) + os.sep) and member_path != target_dir:
+            raise _ZipPathTraversalError(
+                f"Zip Slip detected — entry '{member.filename}' resolves to "
+                f"'{member_path}' which is outside target directory '{target_dir}'. "
+                f"This ZIP archive may be maliciously crafted."
+            )
+    # All entries validated — safe to extract
+    zf.extractall(target_dir)
+
+
+# ---------------------------------------------------------------------------
 # ClawHub download helper (pure Python, no external dependencies)
 # ---------------------------------------------------------------------------
 
@@ -322,7 +352,7 @@ def download_from_clawhub(slug: str, version: str | None = None) -> tuple[Path, 
     meta_url = f"{CLAWHUB_API_BASE}/skills/{slug}"
     print(f"Fetching metadata for '{slug}' from ClawHub...", file=sys.stderr)
     try:
-        req = Request(meta_url, headers={"Accept": "application/json", "User-Agent": "skill-security-audit/1.2.0"})
+        req = Request(meta_url, headers={"Accept": "application/json", "User-Agent": "skill-security-audit/1.3.0"})
         with urlopen(req, timeout=30) as resp:
             meta = json.loads(resp.read().decode("utf-8"))
     except HTTPError as e:
@@ -345,7 +375,7 @@ def download_from_clawhub(slug: str, version: str | None = None) -> tuple[Path, 
     print(f"Downloading skill package...", file=sys.stderr)
     zip_path = tmp_dir / f"{slug}.zip"
     try:
-        req = Request(download_url, headers={"User-Agent": "skill-security-audit/1.2.0"})
+        req = Request(download_url, headers={"User-Agent": "skill-security-audit/1.3.0"})
         with urlopen(req, timeout=120) as resp:
             zip_path.write_bytes(resp.read())
     except HTTPError as e:
@@ -357,14 +387,18 @@ def download_from_clawhub(slug: str, version: str | None = None) -> tuple[Path, 
         print(f"Error: Download failed.\n{e}", file=sys.stderr)
         sys.exit(2)
 
-    # Step 3: Extract zip
+    # Step 3: Extract zip (with Zip Slip / path traversal protection)
     extract_dir = tmp_dir / "extracted"
     try:
         with zipfile.ZipFile(zip_path, "r") as zf:
-            zf.extractall(extract_dir)
+            safe_extract(zf, extract_dir)
     except zipfile.BadZipFile:
         shutil.rmtree(tmp_dir, ignore_errors=True)
         print(f"Error: Downloaded file for '{slug}' is not a valid zip archive.", file=sys.stderr)
+        sys.exit(2)
+    except _ZipPathTraversalError as e:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        print(f"SECURITY ERROR: {e}", file=sys.stderr)
         sys.exit(2)
 
     # Step 4: Locate the skill directory (may be nested inside the zip)
@@ -439,7 +473,7 @@ def scan_skill(skill_path: Path) -> dict:
     report = {
         "scan_metadata": {
             "tool": "skill-security-audit/scan_skill.py",
-            "version": "1.2.0",
+            "version": "1.3.0",
             "scanned_at": datetime.now(timezone.utc).isoformat(),
             "skill_directory": str(skill_path),
             "skill_name": skill_path.name,

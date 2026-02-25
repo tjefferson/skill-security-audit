@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-02-25
+
+### Security
+- Added Zip Slip (path traversal) protection for ZIP extraction in `--slug` mode
+- All ZIP entries are now validated to resolve within the target directory before extraction
+- Maliciously crafted ZIP archives with `../` path traversal entries are rejected with a security error
+
 ## [1.2.0] - 2026-02-25
 
 ### Changed
